@@ -1,25 +1,19 @@
 """
-ARES X v8.0 TITAN ENTERPRISE — Sovereign Intelligence OS
-==========================================================
-Inherits v5/v6 (Autonomous Reasoning & Execution).
-Adds v7 TITAN  (sensor fusion, digital twins, mission OS, decision
-intelligence, simulation, evidence vault, mission-control UI).
-Adds v8 ENTERPRISE (sovereign AI cluster, enterprise RAG, federated
-search, post-quantum crypto, compliance pipeline, agentic threat
-response).
+ARES X v12 — Neural Architecture: Sovereign Intelligence OS
+============================================================
+Sensor fusion, digital twins, mission OS, decision intelligence,
+simulation, evidence vault, sovereign AI cluster, enterprise RAG,
+federated search, post-quantum crypto, compliance pipeline and
+agentic threat response — behind one chat interface.
 
 Public surface
 --------------
     from aresx import boot_v8, bus, EventType
-    boot_v8()                    # one-line v8 substrate startup
-
-Note: exported as ``boot_v8`` (NOT ``boot``) because v6's top-level
-``ares_x.py`` defines its own module-level ``boot()`` function. Keeping
-the names distinct avoids any "wait which boot is this" confusion.
+    boot_v8()                    # one-line substrate startup
 """
 
-__version__ = "10.0.0"
-__codename__ = "SIMPLIFY"
+__version__ = "12.0.0"
+__codename__ = "NEURAL ARCHITECTURE"
 __author__  = "ARES X"
 
 # Lightweight re-exports for ergonomic access. Heavy submodules

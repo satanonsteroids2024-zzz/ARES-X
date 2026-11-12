@@ -1,5 +1,5 @@
 #!/bin/bash
-# ARES X v9 — Kali/XFCE native installer
+# ARES X v12 — Kali/XFCE native installer
 # Installs ARES as a real desktop application: menu entry, native window,
 # and an optional background systemd service — not "cd and run a script."
 set -e
@@ -14,7 +14,7 @@ SYSTEMD_DIR="$HOME/.config/systemd/user"
 SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 echo "═══════════════════════════════════════════════════"
-echo "  ARES X v9 — Kali/XFCE Native Install"
+echo "  ARES X v12 — Kali/XFCE Native Install"
 echo "═══════════════════════════════════════════════════"
 
 # ── 1. System dependencies (GTK webview backend + X11 automation) ────────

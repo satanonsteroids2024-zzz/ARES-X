@@ -1,4 +1,4 @@
-# ARES X v9 — Kali / XFCE Native Install
+# ARES X v12 — Kali / XFCE Native Install
 
 Two ways to run ARES on Kali. Same backend either way — pick based on
 what you want.
@@ -8,7 +8,7 @@ what you want.
 ## Option A — Quick, temporary (what `start.sh` already did)
 
 ```bash
-cd ares_x_v9
+cd ARES-X
 ./start.sh
 ```
 
@@ -24,7 +24,7 @@ Applications menu, opens in its own window (not a browser tab), and
 can optionally run as a background service that starts on login.
 
 ```bash
-cd ares_x_v9
+cd ARES-X
 chmod +x packaging/install.sh
 ./packaging/install.sh
 ```

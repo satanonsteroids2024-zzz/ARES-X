@@ -1,8 +1,8 @@
 [Desktop Entry]
 Type=Application
-Name=ARES X v9 TITAN
+Name=ARES X v12
 GenericName=Sovereign Intelligence System
-Comment=ARES X v9 — chat-driven OSINT, recon, and threat intelligence platform
+Comment=ARES X v12 — chat-driven OSINT, recon, and threat intelligence platform
 Exec=ares-x
 Icon=ares-x
 Terminal=false

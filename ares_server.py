@@ -1,5 +1,5 @@
 """
-ARES X v9 TITAN — Server Bridge
+ARES X v12 — Server Bridge
 FastAPI server connecting the chat frontend to the real ARES backend.
 
 Run:
@@ -37,7 +37,7 @@ logger.info("API keys loaded: %s", {k: v for k, v in key_status.items()})
 import aresx.v8_bootstrap as bs
 
 boot_result = bs.boot()
-logger.info("ARES X v8 TITAN booted — tier=%s", boot_result.get("tier", "unknown"))
+logger.info("ARES X v12 booted — tier=%s", boot_result.get("tier", "unknown"))
 
 # ── Force chat-based authorization mode BEFORE anything else can create ────
 # the shared AuthorizationManager in the default "blocking" (terminal
@@ -53,7 +53,7 @@ get_shared_authorization(mode="chat")
 import aresx.chat.router as tool_router
 from aresx.chat.router import _regex_route_message  # noqa: E402
 
-app = FastAPI(title="ARES X v8 TITAN")
+app = FastAPI(title="ARES X v12")
 
 app.add_middleware(
     CORSMiddleware,
@@ -212,6 +212,6 @@ if __name__ == "__main__":
     import uvicorn
 
     threading.Thread(target=_open_browser_delayed, daemon=True).start()
-    logger.info("Starting ARES X v8 TITAN server on http://localhost:8000")
+    logger.info("Starting ARES X v12 server on http://localhost:8000")
     uvicorn.run(app, host="0.0.0.0", port=8000, log_level="warning")
 

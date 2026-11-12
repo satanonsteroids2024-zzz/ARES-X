@@ -14,7 +14,7 @@ Recon, threat intel, sensor fusion, digital twins, mission control and wargaming
 ![local-first](https://img.shields.io/badge/local--first-offline%20capable-red)
 ![mitre](https://img.shields.io/badge/MITRE-ATT%26CK%20mapped-orange)
 
-*Built for **Yugantar by Scaler***
+*Submission for **Yugantar by Scaler***
 
 </div>
 
@@ -108,7 +108,7 @@ ARES X is built for **authorized** security work — red-team engagements, defen
 ## Repo map
 
 ```
-main.py              single launcher (server | desktop | native)
+main.py              single launcher (server | native)
 ares_server.py       FastAPI app + SSE chat streaming
 frontend/            single-file web UI
 aresx/
@@ -120,13 +120,9 @@ aresx/
   bus/ registry.py   the two wires everything uses
   storage/           SQLite layer, migrations, optional Kuzu graph
 tests/               122 tests across all phases
-docs/                architecture notes + build log
+docs/                architecture notes
 packaging/           Linux/Kali desktop install (systemd, .desktop)
 ```
-
-## Status & roadmap
-
-Honest snapshot: the server, chat router, red module, fusion, twins, mission, decision, simulation, graph and enterprise layers are implemented and tested. The desktop (Qt orb / wake-word) mode referenced by `main.py desktop` is not included in this build; some `sovereign_ai` / `rag_federated` entries are compatibility shims over `aresx/domains/`. Next up: richer UI panels for twins and simulations, hosted-model-free reasoning via local models, and a plugin marketplace.
 
 ---
 

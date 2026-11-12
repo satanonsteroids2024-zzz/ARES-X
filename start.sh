@@ -1,9 +1,9 @@
 #!/bin/bash
-# ARES X v8 TITAN — one-command launcher
+# ARES X v12 — one-command launcher
 set -e
 
 echo "═══════════════════════════════════════"
-echo "  ARES X v8 TITAN — Starting"
+echo "  ARES X v12 — Starting"
 echo "═══════════════════════════════════════"
 
 # Check env vars

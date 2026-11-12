@@ -2,7 +2,7 @@
 """
 Standalone tool-router test — run this directly:
 
-    cd ares_x_v9
+    cd ARES-X
     python3 test_tool_router.py
 
 Tests that varied, casual phrasing (not exact keyword matches) still

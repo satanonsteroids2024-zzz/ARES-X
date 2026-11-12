@@ -1,5 +1,5 @@
 [Unit]
-Description=ARES X v9 TITAN — Sovereign Intelligence Backend
+Description=ARES X v12 — Sovereign Intelligence Backend
 After=network-online.target
 Wants=network-online.target
 

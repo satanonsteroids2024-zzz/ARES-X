@@ -2,7 +2,7 @@
 """
 Standalone chat-authorization test — run this directly:
 
-    cd ares_x_v9
+    cd ARES-X
     python3 test_chat_auth.py
 
 Verifies the full "ARES asks in chat, you say yes/no in chat" flow
