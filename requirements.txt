@@ -1,0 +1,60 @@
+# ═══════════════════════════════════════════════════════════════
+# ARES X — Consolidated Python Dependencies
+# ═══════════════════════════════════════════════════════════════
+# Consolidates the previous requirements.txt (v5-era) + requirements_v8.txt.
+# See ADR-NATIONAL-HIGHWAY, Phase 0 item 1.
+#
+# Install:      pip install -r requirements.txt
+# Python 3.11+ required (3.12 tested).
+# ═══════════════════════════════════════════════════════════════
+
+# ── MANDATORY (system won't boot without these) ─────────────────
+httpx[http2]>=0.27.0          # all HTTP calls: Gemini, Groq, Ollama, OpenRouter
+aiosqlite>=0.20.0             # async SQLite for storage layer
+networkx>=3.3                 # graph analytics (influence, community, centrality)
+fastapi>=0.111.0              # chat backend HTTP framework
+uvicorn>=0.30.0               # ASGI server for FastAPI
+pydantic>=2.7.0               # request/response models
+
+# ── Optional: native desktop window (ares_native.py) ────────────
+# pywebview>=5.0                # GTK/Qt native window over the FastAPI app
+
+# ── Optional: desktop / GUI automation ─────────────────────────
+# Required by aresx.modules.actions.* (dead_end in the live chat path —
+# kept for future wiring per ADR-NATIONAL-HIGHWAY Phase 4+).
+# pyautogui>=0.9.54             # screen/mouse/keyboard control (X11 only)
+# mss>=9.0.1                    # fast cross-platform screenshots
+# Pillow>=10.3.0                # image processing (PIL)
+# opencv-python-headless>=4.10.0 # camera capture (watchers)
+# imagehash>=4.3.1              # perceptual hashing (watchers)
+# psutil>=5.9.8                 # process/hardware info
+
+# ── Optional: office documents / PDF ───────────────────────────
+# openpyxl>=3.1.2               # Excel read/write
+# python-docx>=1.1.0            # Word .docx manipulation
+# python-pptx>=0.6.23           # PowerPoint .pptx manipulation
+# pypdf>=4.2.0                  # PDF split/merge/encrypt
+# pymupdf>=1.24.0               # PDF text extraction (fitz)
+
+# ── Optional: better RAG performance ───────────────────────────
+# sentence-transformers>=2.7.0  # real embeddings (falls back to hash if absent)
+# lancedb>=0.6.0                # vector store (falls back to in-memory if absent)
+
+# ── Optional: graph database ───────────────────────────────────
+# kuzu>=0.4.0                   # graph DB backend (gracefully disabled if absent)
+
+# ── Optional: web / OSINT ──────────────────────────────────────
+# beautifulsoup4>=4.12.3        # HTML parsing
+# lxml>=5.2.0                   # faster BS4 parser
+# duckduckgo-search>=6.3.0      # async DDG search
+# whois>=0.9.27                 # domain WHOIS lookups
+# dnspython>=2.6.1              # async DNS resolution
+# selenium>=4.21.0              # Browser tab orchestration
+# requests>=2.32.0              # sync HTTP fallback
+
+# ── Optional: legacy voice / Qt orb (cut in v11 restructure) ───
+# All voice/Qt code paths were removed in v11's Phase A demolition.
+# PySide6>=6.7.0                # Qt orb UI (removed)
+# faster-whisper>=1.0.2         # voice STT (removed)
+# sounddevice>=0.4.7            # microphone input (removed)
+# SpeechRecognition>=3.10.0     # STT fallback (removed)

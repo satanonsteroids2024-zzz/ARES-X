@@ -1,0 +1,5 @@
+{
+  "_comment": "Domains/IPs listed here skip the live y/n prompt entirely — add your own sites here so testing is instant. Anything NOT listed will prompt you live before running.",
+  "allowed_domains": [],
+  "allowed_ip_ranges": []
+}

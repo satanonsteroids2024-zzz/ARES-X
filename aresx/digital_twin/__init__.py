@@ -1,0 +1,42 @@
+"""ARES X v10 — compat shim for moved package aresx.digital_twin."""
+from __future__ import annotations
+# forwards 39 public symbols
+from aresx.domains.twin.twins.adversary_twin import AdversaryTwinResult  # noqa: F401
+from aresx.domains.twin.twins.supply_chain_and_cyber_terrain import CyberTerrainTwinResult  # noqa: F401
+from aresx.domains.twin.twins.timeline_twin import DiffReport  # noqa: F401
+from aresx.domains.twin.twins.human_twin import HumanTwinPrivacyGateRequired  # noqa: F401
+from aresx.domains.twin.twins.human_twin import HumanTwinResult  # noqa: F401
+from aresx.domains.twin.twins.infra_twin import InfraNode  # noqa: F401
+from aresx.domains.twin.twins.infra_twin import InfraTwinResult  # noqa: F401
+from aresx.domains.twin.twins.org_twin import OrgEntity  # noqa: F401
+from aresx.domains.twin.twins.org_twin import OrgTwinResult  # noqa: F401
+from aresx.domains.twin.__init__ import PHASE_STATUS  # noqa: F401
+from aresx.domains.twin.twins.timeline_twin import SNAPSHOT_INTERVAL_SECONDS  # noqa: F401
+from aresx.domains.twin.twins.supply_chain_and_cyber_terrain import SupplyChainTwinResult  # noqa: F401
+from aresx.domains.twin.twins.adversary_twin import TTP  # noqa: F401
+from aresx.domains.twin.twins.human_twin import approve_gate  # noqa: F401
+from aresx.domains.twin.twins.adversary_twin import build_adversary_twin  # noqa: F401
+from aresx.domains.twin.twins.supply_chain_and_cyber_terrain import build_cyber_terrain_twin  # noqa: F401
+from aresx.domains.twin.twins.human_twin import build_human_twin  # noqa: F401
+from aresx.domains.twin.twins.infra_twin import build_infra_twin  # noqa: F401
+from aresx.domains.twin.twins.org_twin import build_org_twin  # noqa: F401
+from aresx.domains.twin.twins.supply_chain_and_cyber_terrain import build_supply_chain_twin  # noqa: F401
+from aresx.domains.twin.twin_builder import build_twin  # noqa: F401
+from aresx.domains.twin.twin_updater import compute_freshness  # noqa: F401
+from aresx.domains.twin.twin_store import create_twin  # noqa: F401
+from aresx.domains.twin.twin_store import find_twin_by_name  # noqa: F401
+from aresx.domains.twin.twin_visualizer import get_diff_visualization  # noqa: F401
+from aresx.domains.twin.twin_visualizer import get_layout_data  # noqa: F401
+from aresx.domains.twin.twin_store import get_twin  # noqa: F401
+from aresx.domains.twin.twin_store import list_snapshots  # noqa: F401
+from aresx.domains.twin.twin_store import list_twins  # noqa: F401
+from aresx.domains.twin.twin_store import load_snapshot  # noqa: F401
+from aresx.domains.twin.twins.infra_twin import logger  # noqa: F401
+from aresx.domains.twin.twin_updater import refresh_active_twins  # noqa: F401
+from aresx.domains.twin.twin_updater import refresh_twin  # noqa: F401
+from aresx.domains.twin.twins.human_twin import request_human_twin_approval  # noqa: F401
+from aresx.domains.twin.twins.timeline_twin import run_scheduled_snapshots  # noqa: F401
+from aresx.domains.twin.twin_store import save_snapshot  # noqa: F401
+from aresx.domains.twin.twins.timeline_twin import take_snapshot  # noqa: F401
+from aresx.domains.twin.twins.timeline_twin import twin_diff  # noqa: F401
+from aresx.domains.twin.twin_store import update_twin_status  # noqa: F401

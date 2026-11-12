@@ -1,0 +1,17 @@
+# runtime state — generated on first run
+titan.db
+*.db
+config.json
+aresx/config.json
+runtime_live.json
+keys/
+dead_drops/
+investigations/
+.env
+
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.DS_Store

@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=ARES X v9 TITAN
+GenericName=Sovereign Intelligence System
+Comment=ARES X v9 — chat-driven OSINT, recon, and threat intelligence platform
+Exec=ares-x
+Icon=ares-x
+Terminal=false
+Categories=Network;Security;Development;
+Keywords=osint;recon;threat intelligence;security;pentest;red team;
+StartupNotify=true
+StartupWMClass=ares-x

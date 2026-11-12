@@ -1,0 +1,23 @@
+[Unit]
+Description=ARES X v9 TITAN — Sovereign Intelligence Backend
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/.local/share/ares-x
+ExecStart=/usr/bin/python3 %h/.local/share/ares-x/ares_server.py
+Restart=on-failure
+RestartSec=3
+# Cap restart attempts so a persistently-broken process doesn't loop
+# forever silently consuming resources — surfaces as a stopped unit
+# instead, visible via `systemctl --user status ares-x`.
+StartLimitIntervalSec=120
+StartLimitBurst=5
+
+# Load API keys from the user's env file if present (not committed,
+# not shipped — created by install.sh from the template).
+EnvironmentFile=-%h/.config/ares-x/env
+
+[Install]
+WantedBy=default.target
