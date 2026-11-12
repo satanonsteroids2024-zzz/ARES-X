@@ -56,19 +56,25 @@ ares ▸ [threat_actor] 14 TTPs mapped to ATT&CK · 3 linked IOCs · added to mi
 Hub-and-spoke: subsystems never import each other — they talk over an **event bus** and a **registry**.
 
 ```mermaid
-flowchart LR
-    UI["Web UI<br/>(FastAPI + SSE)"] --> R["Chat Router<br/>LLM tool-calling"]
-    R --> REG{{"Registry"}}
-    REG --> RED["Red module<br/>recon · intel · ROE"]
+flowchart TD
+    UI["Web UI - FastAPI + SSE"] --> R["Chat Router - LLM tool-calling"]
+    R --> REG["Registry"]
+    REG --> RED["Red module: recon, intel, ROE"]
     REG --> FUS["Fusion engine"]
     REG --> TWIN["Digital twins"]
     REG --> MIS["Mission OS"]
-    REG --> DEC["Decision + Simulation"]
+    REG --> DEC["Decision and Simulation"]
     REG --> GR["Graph analytics"]
     REG --> RAG["Federated RAG"]
-    RED & FUS & TWIN & MIS & DEC & GR & RAG <--> BUS(("Event bus"))
-    BUS --> ST[("SQLite · audit chain<br/>evidence vault")]
-    R -. fallback chain .-> LLM["Gemini → Groq → OpenRouter → HF → Ollama"]
+    RED --> BUS["Event bus"]
+    FUS --> BUS
+    TWIN --> BUS
+    MIS --> BUS
+    DEC --> BUS
+    GR --> BUS
+    RAG --> BUS
+    BUS --> ST["SQLite: audit chain and evidence vault"]
+    R -.-> LLM["Gemini, Groq, OpenRouter, HF, Ollama"]
 ```
 
 Design rules (full write-up in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)): one wire (bus + registry), no god files, `__init__` exports only, one storage layer, one router, every third-party dependency optional and lazy — a bare install boots cleanly and degrades gracefully.
