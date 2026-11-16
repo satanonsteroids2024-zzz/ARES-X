@@ -12,7 +12,7 @@ ARES X v5 — MCP Tool Library (actions.py)
 from __future__ import annotations
 
 from aresx.modules.actions._helpers import (
-    _ps_run, _safe_pyauto, _sanitize,
+    _ps_run, _safe_pyauto, _sanitize, _HTTPX,
 )
 
 import asyncio
@@ -193,12 +193,6 @@ import struct
 import tempfile
 import urllib.request
 from typing import Tuple
-
-try:
-    import httpx
-    _HTTPX = True
-except ImportError:
-    _HTTPX = False
 
 
 # ══════════════════════════════════════════════════════════════

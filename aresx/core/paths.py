@@ -8,6 +8,11 @@ compat facade) so existing importers keep working unmodified.
 """
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import httpx
+
 import asyncio
 import base64
 import hashlib
@@ -199,21 +204,54 @@ def run_async(coro) -> Any:
         return None
 
 
-# ── HTTPX Async Client Pool ────────────────────────────────────
-_http_client: Optional["httpx.AsyncClient"] = None
-_http_lock = asyncio.Lock() if asyncio.get_event_loop_policy() else None
+# ── Shared async HTTP client ───────────────────────────────────
+# ONE pooled, HTTP/2 httpx.AsyncClient reused by every outbound call in
+# the process — LLM providers, OSINT endpoints, connectivity checks.
+# Connection keepalive + HTTP/2 multiplexing instead of a fresh TLS
+# handshake per request (a multi-step Gemini/Groq tool turn makes
+# several calls to the same host). Keyed by the running event loop so
+# the CLI's background-thread loop (see run_async / get_loop) and the
+# server's main loop each get a correctly bound client rather than the
+# cross-loop reuse that raised "Event loop is closed".
+# loop id -> (loop, client). The loop object is kept (not just its id) so
+# a recycled id() after a loop is GC'd can't hand back a client bound to
+# the dead loop.
+_http_clients: "Dict[int, Any]" = {}
+_http_clients_lock = threading.Lock()
 
 
-async def _get_http() -> "httpx.AsyncClient":
-    global _http_client
-    if _http_client is None or _http_client.is_closed:
-        _http_client = httpx.AsyncClient(
-            timeout=httpx.Timeout(connect=5.0, read=60.0, write=10.0, pool=5.0),
-            limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
-            http2=True,
-            follow_redirects=True,
-        )
-    return _http_client
+def _new_http_client() -> "httpx.AsyncClient":
+    import httpx
+    return httpx.AsyncClient(
+        timeout=httpx.Timeout(connect=5.0, read=60.0, write=10.0, pool=5.0),
+        limits=httpx.Limits(max_connections=50, max_keepalive_connections=20,
+                            keepalive_expiry=30.0),
+        http2=True,
+        follow_redirects=True,
+    )
+
+
+async def get_http_client() -> "httpx.AsyncClient":
+    """Return the process-wide shared httpx.AsyncClient bound to the
+    current event loop. Callers must NOT close it — it is owned here and
+    lives for the lifetime of its loop."""
+    loop = asyncio.get_running_loop()
+    loop_id = id(loop)
+    with _http_clients_lock:
+        # Drop entries whose loop is closed/gone or whose client was closed.
+        for lid, (l, c) in list(_http_clients.items()):
+            if c.is_closed or l.is_closed():
+                _http_clients.pop(lid, None)
+        entry = _http_clients.get(loop_id)
+        if entry is not None and entry[0] is loop and not entry[1].is_closed:
+            return entry[1]
+        client = _new_http_client()
+        _http_clients[loop_id] = (loop, client)
+        return client
+
+
+# Back-compat alias — older internal callers use the private name.
+_get_http = get_http_client
 
 
 async def _async_post(url: str, body: Dict, headers: Dict,
@@ -241,7 +279,7 @@ async def _async_get(url: str, timeout: float = 15.0) -> Optional[bytes]:
 
 # ── Online Check (async, cached 30s) ──────────────────────────
 _online_cache: Dict[str, Any] = {"val": True, "ts": 0.0}
-_online_lock = asyncio.Lock() if False else threading.Lock()
+_online_lock = threading.Lock()
 
 
 async def is_online_async() -> bool:

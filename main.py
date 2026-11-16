@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import argparse
 import logging
-import subprocess
 import sys
 from pathlib import Path
 
@@ -32,21 +31,6 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s — %(message)s",
 )
 logger = logging.getLogger("aresx.main")
-
-MODES = {
-    "server":  "ares_server.py",
-    "native":  "ares_native.py",
-}
-
-
-def _run_script(script: Path, extra_args: list[str]) -> None:
-    """Run a legacy entry script in a subprocess with PYTHONPATH rooted here,
-    so no entry script needs its own sys.path hacks for downstream uses."""
-    env = {**__import__("os").environ}
-    pythonpath = env.get("PYTHONPATH", "")
-    env["PYTHONPATH"] = f"{APP_DIR}" + (f":{pythonpath}" if pythonpath else "")
-    raise SystemExit(subprocess.call(
-        [sys.executable, str(script), *extra_args], cwd=str(APP_DIR), env=env))
 
 
 def cmd_server(args: argparse.Namespace) -> None:

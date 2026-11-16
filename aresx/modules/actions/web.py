@@ -12,11 +12,12 @@ ARES X v5 — MCP Tool Library (actions.py)
 from __future__ import annotations
 
 from aresx.modules.actions._helpers import (
-    _ps_run, _safe_pyauto, _sanitize,
+    _ps_run, _safe_pyauto, _sanitize, _HTTPX,
 )
 
 import asyncio
 import base64
+import hashlib
 import json
 import os
 import re
@@ -44,8 +45,10 @@ from aresx.core import (
 
 # ── Safe subprocess helpers ───────────────────────────────────
 def browser_tabs(action: str, urls: str = "", tab_index: int = 0) -> None:
-    """Sync wrapper for browser_tabs_async."""
+    """Sync wrapper for browser_tabs_async (defined in office.py — the
+    actions.py split left this cross-file reference unimported)."""
     from aresx.core import speak, show, run_async
+    from aresx.modules.actions.office import browser_tabs_async
     show("thinking")
     result = run_async(browser_tabs_async(action, urls, tab_index))
     speak(result or "Done.")
@@ -259,6 +262,11 @@ async def git_advanced_async(action: str, repo_path: str = "",
     action: branch | checkout | merge | pull | stash | log | diff | clone | pr_open
     """
     from aresx.core import log
+    # _run_git_async is defined in file_ops.py — this cross-file reference
+    # was left unimported when actions.py was split. It returns
+    # (returncode, output), not a bare string; unpack it below instead of
+    # treating the tuple itself as the result (which was always truthy).
+    from aresx.modules.actions.file_ops import _run_git_async
 
     cwd = repo_path or str(Path.cwd())
     a = action.lower()
@@ -273,25 +281,25 @@ async def git_advanced_async(action: str, repo_path: str = "",
     }
 
     if a in cmd_map:
-        result = await _run_git_async(cmd_map[a], cwd, timeout=30.0)
-        return result or "Done."
+        _, out = await _run_git_async(cmd_map[a], cwd, timeout=30.0)
+        return out or "Done."
 
     if a == "checkout" and branch:
-        result = await _run_git_async(["git", "checkout", branch], cwd)
-        return result or f"Switched to {branch}."
+        _, out = await _run_git_async(["git", "checkout", branch], cwd)
+        return out or f"Switched to {branch}."
 
     if a == "merge" and branch:
-        result = await _run_git_async(["git", "merge", branch], cwd)
-        return result or f"Merged {branch}."
+        _, out = await _run_git_async(["git", "merge", branch], cwd)
+        return out or f"Merged {branch}."
 
     if a == "clone" and message:  # message = URL here
-        result = await _run_git_async(["git", "clone", message], cwd)
-        return result or f"Cloned {message}."
+        _, out = await _run_git_async(["git", "clone", message], cwd)
+        return out or f"Cloned {message}."
 
     if a == "pr_open":
         # Open PR on GitHub using gh CLI
-        result = await _run_git_async(["gh", "pr", "create", "--fill"], cwd, timeout=20.0)
-        return result or "PR opened."
+        _, out = await _run_git_async(["gh", "pr", "create", "--fill"], cwd, timeout=20.0)
+        return out or "PR opened."
 
     return "Unknown git action."
 

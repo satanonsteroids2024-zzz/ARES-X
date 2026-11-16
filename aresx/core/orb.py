@@ -17,7 +17,7 @@ try:
 except ImportError:
     _QT = False
 
-from aresx.core.paths import cfg, log, is_quiet_hours
+from aresx.core.paths import cfg, log, is_quiet_hours, save_config
 from aresx.core.audio import speak
 
 import asyncio
@@ -234,7 +234,7 @@ else:
     # ── Tkinter fallback when PySide6 not installed ──
     try:
             import tkinter as tk
-            from PIL import ImageTk  # type: ignore
+            from PIL import Image, ImageDraw, ImageTk  # type: ignore
 
             class Orb:  # type: ignore
                 """PIL double-buffered Tkinter Orb (fallback if PySide6 unavailable)."""

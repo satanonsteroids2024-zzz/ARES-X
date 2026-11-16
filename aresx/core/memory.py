@@ -8,7 +8,18 @@ compat facade) so existing importers keep working unmodified.
 """
 from __future__ import annotations
 
-from aresx.core.paths import BASE_DIR, MEMORY_DB, ARCHIVE_DIR, cfg
+from aresx.core.paths import BASE_DIR, MEMORY_DB, ARCHIVE_DIR, NOTES_FILE, cfg, run_async
+from contextlib import asynccontextmanager
+from typing import AsyncIterator
+
+# Optional stays optional (Rule 6): aiosqlite is the mandatory-dep async
+# SQLite driver per requirements.txt, but detect it lazily anyway so a
+# bare/broken install degrades instead of crashing at import time.
+try:
+    import aiosqlite
+    _AIOSQLITE = True
+except ImportError:
+    _AIOSQLITE = False
 
 import asyncio
 import base64
@@ -102,18 +113,33 @@ class Mike:
         self._init_task: Optional[asyncio.Task] = None
         self._sync_lock = threading.Lock()
 
-    async def _ensure_db(self) -> "aiosqlite.Connection":
+    @asynccontextmanager
+    async def _ensure_db(self) -> "AsyncIterator[aiosqlite.Connection]":
+        """Open a connection, apply schema, yield it, then close it.
+
+        Every call site uses this as `async with self._ensure_db() as db:`
+        (no leading `await`) — `_ensure_db` IS the context manager. An
+        aiosqlite.Connection starts its background thread the first time
+        it is awaited/entered; entering it a second time (the old code
+        did `await aiosqlite.connect(...)` here AND `async with` at every
+        call site) raised "threads can only be started once" on every
+        single memory operation. This also fixes the connection/thread
+        leak — the old code never closed what it opened.
+        """
         if not _AIOSQLITE:
             raise RuntimeError("aiosqlite not installed")
         conn = await aiosqlite.connect(self._db_path)
-        await conn.executescript(_MIKE_SCHEMA)
-        await conn.commit()
-        return conn
+        try:
+            await conn.executescript(_MIKE_SCHEMA)
+            await conn.commit()
+            yield conn
+        finally:
+            await conn.close()
 
     # ── Public async API ───────────────────────────────────────
 
     async def remember_async(self, key: str, value: str, tags: Optional[List[str]] = None) -> None:
-        async with await self._ensure_db() as db:
+        async with self._ensure_db() as db:
             await db.execute(
                 "INSERT OR REPLACE INTO facts(key,value,ts,decay,tags) VALUES(?,?,?,?,?)",
                 (str(key), str(value)[:2000], time.time(), 1.0, json.dumps(tags or []))
@@ -123,7 +149,7 @@ class Mike:
     async def all_keys_async(self, prefix: str = "") -> List[str]:
         """Return all stored fact keys, optionally filtered by prefix.
         Additive helper used by the v6 graph-analytics / investigation modules."""
-        async with await self._ensure_db() as db:
+        async with self._ensure_db() as db:
             if prefix:
                 q = "SELECT key FROM facts WHERE key LIKE ? ORDER BY ts DESC"
                 args = (prefix + "%",)
@@ -135,7 +161,7 @@ class Mike:
                 return [r[0] for r in rows]
 
     async def recall_async(self, key: str) -> Optional[str]:
-        async with await self._ensure_db() as db:
+        async with self._ensure_db() as db:
             async with db.execute(
                 "SELECT value, ts FROM facts WHERE key=?", (str(key),)
             ) as cur:
@@ -147,7 +173,7 @@ class Mike:
         return None
 
     async def log_command_async(self, cmd: str, result: str = "") -> None:
-        async with await self._ensure_db() as db:
+        async with self._ensure_db() as db:
             await db.execute(
                 "INSERT INTO commands(cmd,result,ts) VALUES(?,?,?)",
                 (str(cmd)[:500], str(result)[:300], time.time())
@@ -160,7 +186,7 @@ class Mike:
             await db.commit()
 
     async def log_osint_async(self, target: str, result: str) -> None:
-        async with await self._ensure_db() as db:
+        async with self._ensure_db() as db:
             await db.execute(
                 "INSERT INTO osint_log(target,result,ts) VALUES(?,?,?)",
                 (str(target)[:200], str(result)[:1000], time.time())
@@ -172,7 +198,7 @@ class Mike:
             await db.commit()
 
     async def add_note_async(self, text: str, tags: Optional[List[str]] = None) -> None:
-        async with await self._ensure_db() as db:
+        async with self._ensure_db() as db:
             await db.execute(
                 "INSERT INTO notes(note,ts,tags) VALUES(?,?,?)",
                 (str(text)[:2000], time.time(), json.dumps(tags or []))
@@ -185,7 +211,7 @@ class Mike:
             pass
 
     async def link_async(self, from_key: str, to_key: str, relation: str = "related") -> None:
-        async with await self._ensure_db() as db:
+        async with self._ensure_db() as db:
             await db.execute(
                 "INSERT INTO graph(from_key,to_key,relation,ts) VALUES(?,?,?,?)",
                 (str(from_key), str(to_key), relation, time.time())
@@ -198,7 +224,7 @@ class Mike:
 
     async def add_project_async(self, name: str, desc: str = "",
                                  links: Optional[List[str]] = None) -> None:
-        async with await self._ensure_db() as db:
+        async with self._ensure_db() as db:
             await db.execute(
                 "INSERT OR REPLACE INTO projects(name,desc,status,links,ts) VALUES(?,?,?,?,?)",
                 (name, desc, "active", json.dumps(links or []), time.time())
@@ -206,7 +232,7 @@ class Mike:
             await db.commit()
 
     async def log_pattern_async(self, ptype: str, data: str) -> None:
-        async with await self._ensure_db() as db:
+        async with self._ensure_db() as db:
             await db.execute(
                 "INSERT INTO patterns(ptype,data,ts) VALUES(?,?,?)",
                 (ptype, str(data)[:500], time.time())
@@ -218,7 +244,7 @@ class Mike:
             await db.commit()
 
     async def recent_commands_async(self, n: int = 8) -> List[Dict]:
-        async with await self._ensure_db() as db:
+        async with self._ensure_db() as db:
             async with db.execute(
                 "SELECT cmd, result, ts FROM commands ORDER BY ts DESC LIMIT ?", (n,)
             ) as cur:
@@ -227,7 +253,7 @@ class Mike:
 
     async def context_for_ai_async(self, n: int = 10) -> str:
         parts: List[str] = []
-        async with await self._ensure_db() as db:
+        async with self._ensure_db() as db:
             # Recent commands with decay scoring
             async with db.execute(
                 "SELECT cmd, ts FROM commands ORDER BY ts DESC LIMIT ?", (n,)
@@ -267,7 +293,7 @@ class Mike:
         return "\n".join(parts)
 
     async def summary_async(self) -> str:
-        async with await self._ensure_db() as db:
+        async with self._ensure_db() as db:
             async with db.execute("SELECT COUNT(*) FROM commands") as c:
                 n_cmds = (await c.fetchone())[0]
             async with db.execute("SELECT COUNT(*) FROM facts") as c:
@@ -320,7 +346,7 @@ class Mike:
 
     def get_project(self, name: str) -> Optional[Dict]:
         async def _get():
-            async with await self._ensure_db() as db:
+            async with self._ensure_db() as db:
                 async with db.execute(
                     "SELECT name,desc,status,links,ts FROM projects WHERE name=?", (name,)
                 ) as cur:
@@ -339,7 +365,7 @@ class Mike:
             out: Dict[str, Any] = {"facts": {}, "commands": [], "notes": [],
                                     "osint": [], "graph": [], "projects": {}, "patterns": []}
             try:
-                async with await self._ensure_db() as db:
+                async with self._ensure_db() as db:
                     async with db.execute("SELECT key,value FROM facts") as c:
                         for r in await c.fetchall():
                             out["facts"][r[0]] = {"value": r[1]}

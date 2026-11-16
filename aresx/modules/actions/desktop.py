@@ -12,7 +12,7 @@ ARES X v5 — MCP Tool Library (actions.py)
 from __future__ import annotations
 
 from aresx.modules.actions._helpers import (
-    _ps_run, _safe_pyauto, _sanitize,
+    _ps_run, _ps_async, _safe_pyauto, _sanitize,
 )
 
 import asyncio

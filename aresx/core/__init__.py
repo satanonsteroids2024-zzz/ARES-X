@@ -26,7 +26,8 @@ from aresx.core.paths import (
     _IPC_SECRET, generate_ipc_token, validate_ipc_token,
     _log, log,
     get_loop, run_async,
-    _get_http, _async_post, _async_get, is_online_async, is_online,
+    _get_http, get_http_client, _async_post, _async_get,
+    is_online_async, is_online,
 )
 from aresx.core.memory import mike
 from aresx.core.screen import screenshot_b64, screenshot_save
@@ -43,7 +44,8 @@ __all__ = [
     "DEFAULT_CONFIG", "cfg", "load_config", "save_config", "is_quiet_hours",
     "_IPC_SECRET", "generate_ipc_token", "validate_ipc_token",
     "_log", "log", "get_loop", "run_async",
-    "_get_http", "_async_post", "_async_get", "is_online_async", "is_online",
+    "_get_http", "get_http_client", "_async_post", "_async_get",
+    "is_online_async", "is_online",
     "mike", "screenshot_b64", "screenshot_save",
     "ask_ai_async", "ask_vision_async", "ask_ai_code_async",
     "ask_ai", "ask_vision", "ask_ai_code",

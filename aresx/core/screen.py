@@ -28,6 +28,27 @@ import traceback
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
+from aresx.core.paths import log
+
+# Optional stays optional (Rule 6): screenshot capture needs mss + Pillow,
+# neither of which is a mandatory dependency. Detected once at import so
+# the two functions below can degrade to None/skip instead of crashing
+# when a bare install is missing either one.
+try:
+    import mss
+    import mss.tools
+    _MSS = True
+except ImportError:
+    _MSS = False
+
+try:
+    from PIL import Image
+    _PIL = True
+except ImportError:
+    _PIL = False
+
+
 def screenshot_b64(quality: int = 65) -> Optional[str]:
     if not _MSS or not _PIL:
         return None

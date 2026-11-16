@@ -54,9 +54,22 @@ def connect() -> sqlite3.Connection:
     lifetime and torn down at interpreter exit.
     """
     conn = getattr(_tls, "conn", None)
+    # A thread's cached connection is tied to the DB_PATH it was opened
+    # against. If DB_PATH has since been repointed (tests do this to get
+    # an isolated database), reusing the cached connection would keep
+    # silently reading/writing the OLD file from this thread — e.g. the
+    # background asyncio-loop thread writing audit rows to a deleted
+    # temp DB. Reopen when the path changed. In production DB_PATH never
+    # changes, so this is a no-op.
+    if conn is not None and getattr(_tls, "path", None) != DB_PATH:
+        try:
+            conn.close()
+        finally:
+            conn = None
     if conn is None:
         conn = _new_connection()
         _tls.conn = conn
+        _tls.path = DB_PATH
     return conn
 
 

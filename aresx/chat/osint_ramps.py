@@ -22,14 +22,14 @@ logger = logging.getLogger("ares.osint_ramps")
 
 
 async def _get_json(url: str, timeout: float = 10.0) -> Any:
-    """Fetch JSON from a public OSINT endpoint with lazy httpx import."""
+    """Fetch JSON from a public OSINT endpoint over the shared pooled client."""
     try:
-        import httpx
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            r = await client.get(url)
-            if r.status_code != 200:
-                return None
-            return r.json()
+        from aresx.core.paths import get_http_client
+        client = await get_http_client()
+        r = await client.get(url, timeout=timeout)
+        if r.status_code != 200:
+            return None
+        return r.json()
     except Exception as exc:
         logger.debug("OSINT endpoint %s failed: %s", url, exc)
         return None
@@ -111,9 +111,9 @@ async def _tool_osint_username_hunt(args: dict) -> dict:
         else:
             # HTML pages: a 200 usually means the profile exists.
             try:
-                import httpx
-                async with httpx.AsyncClient(timeout=8) as client:
-                    claimed = (await client.get(url)).status_code == 200
+                from aresx.core.paths import get_http_client
+                client = await get_http_client()
+                claimed = (await client.get(url, timeout=8.0)).status_code == 200
             except Exception:
                 claimed = False
         results.append({"platform": platform, "claimed": claimed})

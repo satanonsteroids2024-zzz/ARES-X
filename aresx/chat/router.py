@@ -28,6 +28,15 @@ from typing import Any, Callable, Optional
 
 logger = logging.getLogger("ares_tool_router")
 
+
+async def _shared_http_client():
+    """The one process-wide pooled HTTP/2 client (see aresx.core.paths).
+    Reused across every Gemini/Groq call so a multi-step tool turn keeps
+    one keepalive connection per host instead of a TLS handshake per
+    request. Never close the returned client."""
+    from aresx.core.paths import get_http_client
+    return await get_http_client()
+
 # Once Gemini returns a 429 (quota exhausted), retrying it on every
 # follow-up step of a multi-step turn is pure wasted latency — it will
 # fail again, and that extra round-trip time makes it MORE likely the
@@ -54,7 +63,7 @@ from typing import Optional as _Optional
 
 
 _PATTERNS: list[tuple] = [
-    (_re.compile(r'\b(?:scan|recon(?:naissance)?\s*(?:scan)?)\s+(?:target\s+)?([a-z0-9][a-z0-9.\-]+)', _re.I), "recon"),
+    (_re.compile(r'\b(?:scan|recon(?:naissance)?\s*(?:scan)?)\s+(?:(?:target|on|of|against)\s+)?([a-z0-9][a-z0-9.\-]+)', _re.I), "recon"),
     (_re.compile(r'\bcve[\s\-]*(\d{4}[\s\-]*\d{4,6})\b', _re.I), "cve_lookup"),
     (_re.compile(r'\bcve\s+(?:search\s+(?:for\s+)?)?(.+)', _re.I), "cve_search"),
     # More-specific WHOIS pattern (a real domain with a TLD) must precede
@@ -164,7 +173,7 @@ async def _handle_create_mission(goal: str, message: str) -> str:
     return f"Mission created — ID `{mission_id[:8]}`. Goal: {goal}"
 
 
-async def _handle_list_missions(message: str) -> str:
+async def _handle_list_missions(arg: str, message: str) -> str:
     from aresx.mission import list_missions
     missions = list_missions()
     if not missions:
@@ -190,11 +199,11 @@ async def _handle_federated_search(query: str, message: str) -> str:
     return await _summarize(results, message, f"federated search for '{query}'")
 
 
-async def _handle_status(message: str) -> str:
+async def _handle_status(arg: str, message: str) -> str:
     return "ARES is online and operational."
 
 
-async def _handle_wargame(message: str) -> str:
+async def _handle_wargame(arg: str, message: str) -> str:
     from aresx.mission import list_missions
     missions = list_missions()
     return f"War-game readiness check — {len(missions)} missions loaded."
@@ -260,8 +269,8 @@ async def _handle_extract_iocs(text: str, message: str) -> str:
 
 
 async def _llm_fallback(message: str) -> str:
-    from aresx.core.llm import ask_ai
-    return await ask_ai(message)
+    from aresx.core.llm import ask_ai_async
+    return await ask_ai_async(message) or "(no LLM backend available)"
 
 
 _INTENT_HANDLERS = {
@@ -1476,8 +1485,6 @@ async def _gemini_tool_call(message: str, history: Optional[list[dict]] = None) 
         return None
 
     try:
-        import httpx
-
         contents = []
         for turn in (history or []):
             role = turn.get("role", "")
@@ -1515,36 +1522,37 @@ async def _gemini_tool_call(message: str, history: Optional[list[dict]] = None) 
             },
         }
 
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            r = await client.post(
-                "https://generativelanguage.googleapis.com/v1beta/models/"
-                "gemini-flash-latest:generateContent",
-                headers={"Content-Type": "application/json"},
-                params={"key": api_key},
-                json=body,
-            )
-            if r.status_code != 200:
-                if r.status_code == 429:
-                    _mark_gemini_exhausted()
-                logger.warning("Gemini tool-call request failed: HTTP %s — %s", r.status_code, r.text[:300])
-                return None
-
-            data = r.json()
-            candidates = data.get("candidates", [])
-            if not candidates:
-                return None
-
-            parts = candidates[0].get("content", {}).get("parts", [])
-            for part in parts:
-                if "functionCall" in part:
-                    fc = part["functionCall"]
-                    return {"name": fc.get("name"), "args": fc.get("args", {})}
-
-            # No function call — model responded with plain text
-            text = "".join(p.get("text", "") for p in parts).strip()
-            if text:
-                return {"text": text}
+        client = await _shared_http_client()
+        r = await client.post(
+            "https://generativelanguage.googleapis.com/v1beta/models/"
+            "gemini-flash-latest:generateContent",
+            headers={"Content-Type": "application/json"},
+            params={"key": api_key},
+            json=body,
+            timeout=30.0,
+        )
+        if r.status_code != 200:
+            if r.status_code == 429:
+                _mark_gemini_exhausted()
+            logger.warning("Gemini tool-call request failed: HTTP %s — %s", r.status_code, r.text[:300])
             return None
+
+        data = r.json()
+        candidates = data.get("candidates", [])
+        if not candidates:
+            return None
+
+        parts = candidates[0].get("content", {}).get("parts", [])
+        for part in parts:
+            if "functionCall" in part:
+                fc = part["functionCall"]
+                return {"name": fc.get("name"), "args": fc.get("args", {})}
+
+        # No function call — model responded with plain text
+        text = "".join(p.get("text", "") for p in parts).strip()
+        if text:
+            return {"text": text}
+        return None
 
     except Exception as exc:
         logger.warning("Gemini tool-call failed with exception: %s", exc)
@@ -1599,8 +1607,6 @@ async def _groq_tool_call(message: str, history: Optional[list[dict]] = None) ->
         return None
 
     try:
-        import httpx
-
         messages = [{
             "role": "system",
             "content": (
@@ -1632,63 +1638,54 @@ async def _groq_tool_call(message: str, history: Optional[list[dict]] = None) ->
             "temperature": 0.3,
         }
 
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            r = await client.post(
-                "https://api.groq.com/openai/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                },
-                json=body,
+        _groq_url = "https://api.groq.com/openai/v1/chat/completions"
+        _groq_headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+        client = await _shared_http_client()
+        r = await client.post(_groq_url, headers=_groq_headers, json=body, timeout=30.0)
+
+        if r.status_code == 429:
+            # Groq's free-tier TPM limit is easy to brush against
+            # inside a multi-step turn (each call resends the full
+            # tool schema). Groq's own error body includes a real
+            # wait-time hint (e.g. "Please try again in 5.6s") —
+            # respect it once with a bounded retry rather than
+            # aborting the whole multi-step task on a transient,
+            # short-lived limit.
+            retry_after = _parse_groq_retry_seconds(r.text)
+            logger.warning(
+                "Groq tool-call rate limited — retrying once after %.1fs: %s",
+                retry_after, r.text[:300],
             )
+            await asyncio.sleep(retry_after)
+            r = await client.post(_groq_url, headers=_groq_headers, json=body, timeout=30.0)
 
-            if r.status_code == 429:
-                # Groq's free-tier TPM limit is easy to brush against
-                # inside a multi-step turn (each call resends the full
-                # tool schema). Groq's own error body includes a real
-                # wait-time hint (e.g. "Please try again in 5.6s") —
-                # respect it once with a bounded retry rather than
-                # aborting the whole multi-step task on a transient,
-                # short-lived limit.
-                retry_after = _parse_groq_retry_seconds(r.text)
-                logger.warning(
-                    "Groq tool-call rate limited — retrying once after %.1fs: %s",
-                    retry_after, r.text[:300],
-                )
-                await asyncio.sleep(retry_after)
-                r = await client.post(
-                    "https://api.groq.com/openai/v1/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json=body,
-                )
-
-            if r.status_code != 200:
-                logger.warning("Groq tool-call request failed: HTTP %s — %s", r.status_code, r.text[:300])
-                return None
-
-            data = r.json()
-            choices = data.get("choices", [])
-            if not choices:
-                return None
-
-            msg = choices[0].get("message", {})
-            tool_calls = msg.get("tool_calls") or []
-            if tool_calls:
-                fc = tool_calls[0].get("function", {})
-                import json as _json
-                try:
-                    args = _json.loads(fc.get("arguments", "{}"))
-                except (ValueError, TypeError):
-                    args = {}
-                return {"name": fc.get("name"), "args": args}
-
-            text = (msg.get("content") or "").strip()
-            if text:
-                return {"text": text}
+        if r.status_code != 200:
+            logger.warning("Groq tool-call request failed: HTTP %s — %s", r.status_code, r.text[:300])
             return None
+
+        data = r.json()
+        choices = data.get("choices", [])
+        if not choices:
+            return None
+
+        msg = choices[0].get("message", {})
+        tool_calls = msg.get("tool_calls") or []
+        if tool_calls:
+            fc = tool_calls[0].get("function", {})
+            import json as _json
+            try:
+                args = _json.loads(fc.get("arguments", "{}"))
+            except (ValueError, TypeError):
+                args = {}
+            return {"name": fc.get("name"), "args": args}
+
+        text = (msg.get("content") or "").strip()
+        if text:
+            return {"text": text}
+        return None
 
     except Exception as exc:
         logger.warning("Groq tool-call failed with exception: %s", exc)
@@ -1731,7 +1728,7 @@ async def _summarize_tool_result(
             f"JSON or raw data."
         )
 
-    response = inference_api.generate(
+    response = await inference_api.generate_async(
         prompt=prompt,
         task_type="general",
         system=(
@@ -1933,7 +1930,7 @@ async def route_message(message: str, history: Optional[list[dict]] = None) -> s
         logger.warning("[router] Both Gemini and Groq tool-calling failed "
                        "— downshifting to conversational-only fallback")
         from aresx.sovereign_ai import inference_api
-        response = inference_api.generate(
+        response = await inference_api.generate_async(
             prompt=message,
             task_type="general",
             system=(
@@ -2087,7 +2084,7 @@ async def route_message_streaming(message: str, history: Optional[list[dict]] = 
     if decision is None:
         yield {"type": "status", "message": "Falling back to plain conversation..."}
         from aresx.sovereign_ai import inference_api
-        response = inference_api.generate(
+        response = await inference_api.generate_async(
             prompt=message,
             task_type="general",
             system=(

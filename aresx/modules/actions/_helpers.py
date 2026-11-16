@@ -32,6 +32,16 @@ try:
 except ImportError:
     pyautogui = None
 
+# Shared "is httpx available" flag — several action modules (assistant,
+# content, dev, system, web) each referenced a module-local `_HTTPX`
+# that only ever got defined in system.py when actions.py was split;
+# the rest import it from here so there's exactly one probe.
+try:
+    import httpx  # noqa: F401
+    _HTTPX = True
+except ImportError:
+    _HTTPX = False
+
 from aresx.core import (
     ask_ai, ask_vision, cfg, done, err, generate_ipc_token, log, mike,
     needs_confirm, ask_confirm, NOTES_FILE, orb, run_async, screenshot_save,

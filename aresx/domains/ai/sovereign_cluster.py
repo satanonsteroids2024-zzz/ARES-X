@@ -15,6 +15,7 @@ Order 21: Every LLM call in ARES routes through inference_api.generate().
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -370,14 +371,45 @@ _CLOUD_ROUTE_ORDER = ("primary", "secondary", "local", "free_1", "free_2")
 
 
 
-def _try_ollama(prompt: str, model: str, system: Optional[str],
-                max_tokens: int) -> Optional[str]:
-    """
-    Try local Ollama inference. Returns None on failure.
+# ── Synchronous provider surface (compat) ─────────────────────
+# The real implementations are the async twins below. These thin sync
+# wrappers exist for the four synchronous callers and the compat shim
+# that re-exports them by name; each just runs its async twin on the
+# shared background loop. (The pre-async _try_ollama had a `subprocess
+# ollama run` CLI fallback — dropped here: httpx is now a mandatory
+# dependency, so the only real failure is "daemon not listening", which
+# the HTTP path already handles by returning None.)
 
-    Prefers the HTTP API (honors system prompt + num_predict). Falls back
-    to the CLI if httpx is unavailable or the daemon isn't listening.
-    """
+def _sync(coro_fn):
+    def _wrapper(prompt: str, model: str, system: Optional[str],
+                 max_tokens: int) -> Optional[str]:
+        from aresx.core.paths import run_async
+        return run_async(coro_fn(prompt, model, system, max_tokens))
+    _wrapper.__name__ = coro_fn.__name__.replace("_async", "")
+    return _wrapper
+
+
+# ──────────────────────────────────────────────────────────────
+# Async provider twins
+# ──────────────────────────────────────────────────────────────
+# The functions above are synchronous (httpx.post / httpx.Client) and
+# were called, unawaited, from the async chat router — every LLM
+# fallback froze the FastAPI event loop for the whole request. These
+# twins do the identical routing over the one shared pooled HTTP/2
+# client (aresx.core.paths.get_http_client) so an await never blocks
+# the loop. The sync versions stay for the four synchronous callers
+# (rag_query, evaluate_completeness, classify_threat, evaluate_success)
+# and for the compat shim that re-exports them by name.
+
+async def _shared_client():
+    from aresx.core.paths import get_http_client
+    return await get_http_client()
+
+
+async def _try_ollama_async(prompt: str, model: str, system: Optional[str],
+                            max_tokens: int) -> Optional[str]:
+    """Local Ollama over the shared client (HTTP API only — the sync
+    CLI fallback is not used on the async path)."""
     model_name = model.replace("ollama/", "")
     payload = {
         "model": model_name,
@@ -386,47 +418,20 @@ def _try_ollama(prompt: str, model: str, system: Optional[str],
         "stream": False,
         "options": {"num_predict": max_tokens},
     }
-    # Preferred path: HTTP API (parameters actually take effect)
     try:
-        import httpx
-        with httpx.Client(timeout=30) as client:
-            r = client.post("http://localhost:11434/api/generate", json=payload)
-            if r.status_code == 200:
-                text = r.json().get("response", "").strip()
-                return text or None
+        client = await _shared_client()
+        r = await client.post("http://localhost:11434/api/generate",
+                              json=payload, timeout=30.0)
+        if r.status_code == 200:
+            return (r.json().get("response", "").strip()) or None
     except Exception as exc:
-        logger.debug("Ollama HTTP API unavailable, trying CLI: %s", exc)
-
-    # Fallback path: CLI (system prompt / max_tokens not enforced)
-    try:
-        import subprocess
-        result = subprocess.run(
-            ["ollama", "run", model_name],
-            input=prompt, capture_output=True, text=True, timeout=30
-        )
-        if result.returncode == 0:
-            return result.stdout.strip() or None
-    except Exception as exc:
-        logger.debug("Ollama CLI failed: %s", exc)
+        logger.debug("Ollama async API unavailable: %s", exc)
     return None
 
 
-def _try_gemini(prompt: str, model: str, system: Optional[str],
-                max_tokens: int) -> Optional[str]:
-    """
-    Google Gemini — PRIMARY provider.
-
-    Free tier: 15 RPM / 1 000 000 TPD / 1500 RPD — no billing needed.
-    Key: GEMINI_API_KEY — free at aistudio.google.com.
-
-    NOTE: gemini-2.0-flash and gemini-2.5-flash are both retired for
-    new API keys as of mid-2026 (return 404). Routing now uses
-    gemini-flash-latest, a rolling alias Google keeps pointed at
-    whatever the current flash model is — avoids this breaking again
-    on the next model retirement.
-    """
+async def _try_gemini_async(prompt: str, model: str, system: Optional[str],
+                            max_tokens: int) -> Optional[str]:
     try:
-        import os, httpx
         api_key = os.getenv("GEMINI_API_KEY", "")
         if not api_key:
             logger.debug("Gemini: GEMINI_API_KEY not set — skipping primary")
@@ -434,54 +439,37 @@ def _try_gemini(prompt: str, model: str, system: Optional[str],
         model_name = model.replace("gemini/", "")
         body: dict = {
             "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {
-                "maxOutputTokens": max_tokens,
-                "temperature": 0.7,
-            },
+            "generationConfig": {"maxOutputTokens": max_tokens, "temperature": 0.7},
         }
-        # Proper system instruction field (not injected into user content)
         if system:
             body["systemInstruction"] = {"parts": [{"text": system}]}
-        r = httpx.post(
+        client = await _shared_client()
+        r = await client.post(
             f"https://generativelanguage.googleapis.com/v1beta/models/"
-            f"{model_name}:generateContent?key={api_key}",
+            f"{model_name}:generateContent",
             headers={"Content-Type": "application/json"},
+            params={"key": api_key},
             json=body,
-            timeout=30,
+            timeout=30.0,
         )
         if r.status_code == 200:
             candidates = r.json().get("candidates", [])
             if candidates:
-                text = (candidates[0]
-                        .get("content", {})
-                        .get("parts", [{}])[0]
-                        .get("text", ""))
+                text = (candidates[0].get("content", {})
+                        .get("parts", [{}])[0].get("text", ""))
                 return text.strip() or None
         elif r.status_code == 429:
             logger.warning("Gemini rate limit hit — next: Groq secondary")
         else:
             logger.warning("Gemini %s: HTTP %d — %s", model_name, r.status_code, r.text[:300])
     except Exception as exc:
-        logger.warning("Gemini failed with exception: %s", exc)
+        logger.warning("Gemini async failed with exception: %s", exc)
     return None
 
 
-def _try_groq(prompt: str, model: str, system: Optional[str],
-              max_tokens: int) -> Optional[str]:
-    """
-    Groq Inference API — SECONDARY provider.
-
-    Provider: console.groq.com  (NOT xAI's "Grok" — completely different product)
-    Free tier: 30 RPM / 1 000 RPD / 30 000 TPM — forever free, no credit card.
-    Key: GROQ_API_KEY — free at console.groq.com.
-
-    Best free model (verified working Aug 2026):
-      llama-3.3-70b-versatile  — confirmed via direct API test
-
-    On 429: caller falls to Ollama → OpenRouter → HF.
-    """
+async def _try_groq_async(prompt: str, model: str, system: Optional[str],
+                          max_tokens: int) -> Optional[str]:
     try:
-        import os, httpx
         api_key = os.getenv("GROQ_API_KEY", "")
         if not api_key:
             logger.debug("Groq: GROQ_API_KEY not set — skipping secondary")
@@ -491,118 +479,77 @@ def _try_groq(prompt: str, model: str, system: Optional[str],
         if system:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
-        r = httpx.post(
+        client = await _shared_client()
+        r = await client.post(
             "https://api.groq.com/openai/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": model_name,
-                "messages": messages,
-                "max_tokens": max_tokens,
-                "temperature": 0.7,
-            },
-            timeout=20,
+            headers={"Authorization": f"Bearer {api_key}",
+                     "Content-Type": "application/json"},
+            json={"model": model_name, "messages": messages,
+                  "max_tokens": max_tokens, "temperature": 0.7},
+            timeout=20.0,
         )
         if r.status_code == 200:
-            text = (r.json()
-                    .get("choices", [{}])[0]
-                    .get("message", {})
-                    .get("content", ""))
+            text = (r.json().get("choices", [{}])[0]
+                    .get("message", {}).get("content", ""))
             return text.strip() or None
         elif r.status_code == 429:
             logger.warning("Groq rate limit hit — next: Ollama/OpenRouter fallback")
         else:
             logger.warning("Groq %s: HTTP %d — %s", model_name, r.status_code, r.text[:300])
     except Exception as exc:
-        logger.warning("Groq failed with exception: %s", exc)
+        logger.warning("Groq async failed with exception: %s", exc)
     return None
 
 
-def _try_huggingface(prompt: str, model: str, system: Optional[str],
-                     max_tokens: int) -> Optional[str]:
-    """
-    Try HuggingFace Inference API free tier.
-    Requires HF_TOKEN env var (free tier: ~30k calls/month, 30s timeout).
-    Returns None on failure.
-    """
+async def _try_huggingface_async(prompt: str, model: str, system: Optional[str],
+                                 max_tokens: int) -> Optional[str]:
     try:
-        import os
         api_token = os.getenv("HF_TOKEN", "")
         if not api_token:
             logger.debug("HuggingFace: HF_TOKEN not set, skipping free API")
             return None
-        import httpx
         model_name = model.replace("hf/", "")
-        headers = {
-            "Authorization": f"Bearer {api_token}",
-            "Content-Type": "application/json",
-        }
-        messages = []
-        if system:
-            messages.append({"role": "system", "content": system})
-        messages.append({"role": "user", "content": prompt})
-        
-        r = httpx.post(
+        client = await _shared_client()
+        r = await client.post(
             f"https://api-inference.huggingface.co/models/{model_name}",
-            headers=headers,
+            headers={"Authorization": f"Bearer {api_token}",
+                     "Content-Type": "application/json"},
             json={"inputs": prompt},
-            timeout=30,
+            timeout=30.0,
         )
         if r.status_code == 200:
             resp = r.json()
-            # HF format varies; try common patterns
-            if isinstance(resp, list) and len(resp) > 0:
+            if isinstance(resp, list) and resp:
                 if "generated_text" in resp[0]:
                     return resp[0]["generated_text"]
                 if "summary_text" in resp[0]:
                     return resp[0]["summary_text"]
             return str(resp)
     except Exception as exc:
-        logger.debug("HuggingFace API failed: %s", exc)
+        logger.debug("HuggingFace async API failed: %s", exc)
     return None
 
 
-def _try_openrouter_free(prompt: str, model: str, system: Optional[str],
-                         max_tokens: int) -> Optional[str]:
-    """
-    Try OpenRouter free models.
-
-    NOTE: OpenRouter's free tier (":free"-suffixed models) still requires
-    a free account API key — it is not fully keyless. A key with zero
-    OpenRouter credits works fine on ":free" models, no billing required.
-    Get one at https://openrouter.ai/keys (no card needed).
-
-    Skips cleanly (returns None) if no OPENROUTER_API_KEY is set, so
-    this tier just falls through to the next one in the chain rather
-    than sending an unauthenticated request that would always 401.
-    """
+async def _try_openrouter_free_async(prompt: str, model: str, system: Optional[str],
+                                     max_tokens: int) -> Optional[str]:
     try:
-        import os, httpx
         api_key = os.getenv("OPENROUTER_API_KEY", "")
         if not api_key:
             logger.debug("OpenRouter: OPENROUTER_API_KEY not set — skipping tier")
             return None
-
         model_name = model.replace("openrouter/", "")
         messages = []
         if system:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
-
-        r = httpx.post(
+        client = await _shared_client()
+        r = await client.post(
             "https://openrouter.ai/api/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": model_name,
-                "messages": messages,
-                "max_tokens": min(max_tokens, 1000),  # free tier limit
-            },
-            timeout=20,
+            headers={"Authorization": f"Bearer {api_key}",
+                     "Content-Type": "application/json"},
+            json={"model": model_name, "messages": messages,
+                  "max_tokens": min(max_tokens, 1000)},
+            timeout=20.0,
         )
         if r.status_code == 200:
             return r.json().get("choices", [{}])[0].get("message", {}).get("content", "")
@@ -611,10 +558,24 @@ def _try_openrouter_free(prompt: str, model: str, system: Optional[str],
         elif r.status_code == 429:
             logger.debug("OpenRouter: rate limited (free tier: 20/min, 200/day)")
     except Exception as exc:
-        logger.debug("OpenRouter free failed: %s", exc)
+        logger.debug("OpenRouter free async failed: %s", exc)
     return None
 
 
+_ASYNC_PROVIDERS = {
+    "gemini/":     _try_gemini_async,
+    "groq/":       _try_groq_async,
+    "ollama/":     _try_ollama_async,
+    "openrouter/": _try_openrouter_free_async,
+    "hf/":         _try_huggingface_async,
+}
+
+# Synchronous provider surface — thin run_async wrappers over the twins.
+_try_ollama          = _sync(_try_ollama_async)
+_try_gemini          = _sync(_try_gemini_async)
+_try_groq            = _sync(_try_groq_async)
+_try_huggingface     = _sync(_try_huggingface_async)
+_try_openrouter_free = _sync(_try_openrouter_free_async)
 
 
 class InferenceAPI:
@@ -630,49 +591,60 @@ class InferenceAPI:
                   max_tokens: int = 512,
                   force_local: bool = False) -> str:
         """
-        Generate text. Routing (all free tiers):
-          1. Ollama          — local, unlimited, no key
-          2. Gemini free     — 15 RPM / 1M TPD, needs GEMINI_API_KEY
-          3. Grok free       — 25 RPM / 250K TPM, needs GROK_API_KEY
-          4. OpenRouter free — rate-limited, no key
-          5. HF Inference    — 30K/month, needs HF_TOKEN
-        Returns empty string on total failure (never raises for callers).
+        Synchronous inference (never raises; "" on total failure).
+
+        Delegates to generate_async on the shared background loop (see
+        aresx.core.paths.run_async) for the four non-async callers
+        (rag_query, evaluate_completeness, classify_threat,
+        evaluate_success). Async code MUST call generate_async directly
+        so an LLM fallback never blocks the FastAPI event loop.
+        """
+        from aresx.core.paths import run_async
+        return run_async(
+            self.generate_async(prompt, task_type, system, max_tokens, force_local)
+        ) or ""
+
+    async def generate_async(self,
+                             prompt: str,
+                             task_type: str = "general",
+                             system: Optional[str] = None,
+                             max_tokens: int = 512,
+                             force_local: bool = False) -> str:
+        """
+        Async inference over the one shared pooled HTTP/2 client — an
+        await here never freezes the event loop. Routing (all free tiers):
+        Ollama (local, no key) → Gemini (GEMINI_API_KEY) → Groq
+        (GROQ_API_KEY) → OpenRouter (OPENROUTER_API_KEY) → HF (HF_TOKEN),
+        then "" on total failure. Never raises for callers.
         """
         t0 = time.time()
         routing = TITAN_ROUTING.get(task_type, TITAN_ROUTING["general"])
-        cluster_mode = sovereign_cluster.auto_switch_mode()
+        # detect_network() does a blocking socket connect — keep it off
+        # the event loop.
+        loop = asyncio.get_running_loop()
+        cluster_mode = await loop.run_in_executor(
+            None, sovereign_cluster.auto_switch_mode)
 
         result: Optional[str] = None
         model_used = ""
 
         if cluster_mode in (ClusterMode.SOVEREIGN, ClusterMode.AIR_GAP) or force_local:
-            # Air-gap / offline: local Ollama only
             local_model = routing.get("local", "ollama/mistral:7b")
-            result = _try_ollama(prompt, local_model, system, max_tokens)
+            result = await _try_ollama_async(prompt, local_model, system, max_tokens)
             model_used = local_model
         else:
-            # Try each tier in priority order until one succeeds
             for key in _CLOUD_ROUTE_ORDER:
                 model = routing.get(key)
                 if not model:
                     continue
-
-                if model.startswith("gemini/"):
-                    result = _try_gemini(prompt, model, system, max_tokens)
-                elif model.startswith("groq/"):
-                    result = _try_groq(prompt, model, system, max_tokens)
-                elif model.startswith("ollama/"):
-                    result = _try_ollama(prompt, model, system, max_tokens)
-                elif model.startswith("openrouter/"):
-                    result = _try_openrouter_free(prompt, model, system, max_tokens)
-                elif model.startswith("hf/"):
-                    result = _try_huggingface(prompt, model, system, max_tokens)
-
+                for prefix, fn in _ASYNC_PROVIDERS.items():
+                    if model.startswith(prefix):
+                        result = await fn(prompt, model, system, max_tokens)
+                        break
                 if result:
                     model_used = model
                     break
 
-        # Graceful degradation — never crash callers
         if not result:
             logger.warning("[Inference] All providers failed for task=%s", task_type)
             result = ""
@@ -681,9 +653,12 @@ class InferenceAPI:
         latency_ms = (time.time() - t0) * 1000
         tokens_est = len((result or "").split()) + len(prompt.split())
 
-        # Audit every call via event bus (Order 21 — triggers SHA-3 audit chain)
+        # Audit every call via event bus (Order 21 — triggers SHA-3 audit
+        # chain). await bus.publish (not publish_sync): we're in an async
+        # context, and the audit hook must complete before we return so
+        # chain integrity holds — publish_sync would fire-and-forget here.
         try:
-            bus.publish_sync(
+            await bus.publish(
                 EventType.INFERENCE_CALLED,
                 payload={
                     "task_type":    task_type,

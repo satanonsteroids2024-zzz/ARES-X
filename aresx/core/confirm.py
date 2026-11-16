@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from aresx.core.paths import cfg, log, get_loop, run_async
 from aresx.core.orb import orb
+from aresx.core.audio import speak, listen
 
 import asyncio
 import base64

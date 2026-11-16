@@ -8,49 +8,20 @@ compat facade) so existing importers keep working unmodified.
 """
 from __future__ import annotations
 
-from aresx.core.paths import cfg, log
-
-# ── httpx helpers (kept local to avoid a second tiny module) ──
-_http_client = None
-async def _get_http():
-    global _http_client
-    import httpx
-    if _http_client is None or _http_client.is_closed:
-        _http_client = httpx.AsyncClient(
-            timeout=httpx.Timeout(connect=5.0, read=60.0, write=10.0, pool=5.0),
-            limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
-            http2=True, follow_redirects=True)
-    return _http_client
-async def _async_post(url, body, headers, timeout=30.0):
-    try:
-        client = await _get_http()
-        resp = await client.post(url, json=body, headers=headers, timeout=timeout)
-        resp.raise_for_status()
-        return resp.json()
-    except Exception as exc:
-        log(f"HTTP POST [{url[:60]}]: {exc}", "WARN")
-        return None
-async def _async_get(url, timeout=15.0):
-    try:
-        client = await _get_http()
-        resp = await client.get(url, timeout=timeout)
-        resp.raise_for_status()
-        return resp.content
-    except Exception as exc:
-        log(f"HTTP GET [{url[:60]}]: {exc}", "WARN")
-        return None
-async def is_online_async():
-    try:
-        return await _async_get("https://1.1.1.1", timeout=3.0) is not None
-    except Exception:
-        return False
-def is_online():
-    return run_async(is_online_async()) or False
+# HTTP + connectivity helpers live in one place (aresx.core.paths) so
+# every outbound call shares a single pooled HTTP/2 client. Re-exported
+# here because llm.py's backends and older importers use these names.
+from aresx.core.paths import (
+    cfg, log, run_async,
+    get_http_client as _get_http, _async_post, _async_get,
+    is_online_async, is_online,
+)
 
 import asyncio
 import base64
 import hashlib
 import hmac
+import httpx  # mandatory dep (requirements.txt) — used for Ollama read timeouts
 import io
 import json
 import logging
@@ -67,6 +38,9 @@ import traceback
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
+logger = logging.getLogger("ares_llm")
+
 # AI MODEL CONSTANTS (June 2026)
 # ══════════════════════════════════════════════════════════════
 OLLAMA_URL      = "http://localhost:11434/api/chat"
@@ -269,11 +243,11 @@ async def ask_ai_async(
     msgs = [{"role": "system", "content": system},
             {"role": "user", "content": prompt}]
 
-    # 1. Ollama local (fastest, no rate limits, no cost)
-    if await _check_ollama_async():
-        result = await _ollama_text_async(msgs, max_tokens)
-        if result:
-            return result
+    # 1. Ollama local (fastest, no rate limits, no cost). _ollama_text_async
+    # already gates on the cached availability probe — no need to check twice.
+    result = await _ollama_text_async(msgs, max_tokens)
+    if result:
+        return result
 
     # 2. Gemini free tier (best quality among free cloud options)
     result = await _gemini_async(prompt, max_tokens=max_tokens)
@@ -312,6 +286,7 @@ async def ask_vision_async(
       3. Grok free     (text-only fallback)
     """
     if image_b64 is None:
+        from aresx.core.screen import screenshot_b64
         image_b64 = screenshot_b64()
     if not image_b64:
         return None
@@ -350,13 +325,16 @@ async def ask_ai_code_async(
     msgs = [{"role": "system", "content": system},
             {"role": "user", "content": prompt}]
 
-    # 1. Grok — excellent at code, generous free tier
+    # 1. Groq — strong at code, generous free tier
     result = await _groq_async(msgs, max_tokens)
     if result:
         return result
 
-    # 2. Groq — SECONDARY (30 RPM free, good at code)
-    result = await _groq_async(msgs, max_tokens)
+    # 2. Gemini free tier — strong at code + long context
+    # (was a second identical _groq_async call — a copy/paste that
+    # re-hit the same endpoint and never reached Gemini as the
+    # docstring promised).
+    result = await _gemini_async(prompt, max_tokens=max_tokens)
     if result:
         return result
 

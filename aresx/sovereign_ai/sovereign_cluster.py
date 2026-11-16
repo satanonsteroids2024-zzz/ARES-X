@@ -19,6 +19,11 @@ from aresx.domains.ai.sovereign_cluster import _try_gemini
 from aresx.domains.ai.sovereign_cluster import _try_groq
 from aresx.domains.ai.sovereign_cluster import _try_huggingface
 from aresx.domains.ai.sovereign_cluster import _try_openrouter_free
+from aresx.domains.ai.sovereign_cluster import _try_ollama_async
+from aresx.domains.ai.sovereign_cluster import _try_gemini_async
+from aresx.domains.ai.sovereign_cluster import _try_groq_async
+from aresx.domains.ai.sovereign_cluster import _try_huggingface_async
+from aresx.domains.ai.sovereign_cluster import _try_openrouter_free_async
 from aresx.domains.ai.sovereign_cluster import InferenceAPI
 from aresx.domains.ai.sovereign_cluster import inference_api
 from aresx.domains.ai.sovereign_cluster import FineTuneJob

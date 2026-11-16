@@ -12,7 +12,7 @@ ARES X v5 — MCP Tool Library (actions.py)
 from __future__ import annotations
 
 from aresx.modules.actions._helpers import (
-    _ps_run, _safe_pyauto, _sanitize,
+    _ps_run, _safe_pyauto, _sanitize, _HTTPX,
 )
 
 import asyncio
@@ -20,6 +20,7 @@ import base64
 import json
 import os
 import re
+import sqlite3
 import subprocess
 import sys
 import threading
@@ -46,8 +47,10 @@ from aresx.core import (
 def git_advanced(action: str, repo_path: str = "",
                  branch: str = "", message: str = "",
                  remote: str = "origin") -> None:
-    """Sync wrapper for git_advanced_async."""
+    """Sync wrapper for git_advanced_async (defined in web.py — the
+    actions.py split left this cross-file reference unimported)."""
     from aresx.core import speak, show, run_async
+    from aresx.modules.actions.web import git_advanced_async
     show("thinking")
     result = run_async(git_advanced_async(action, repo_path, branch, message, remote))
     speak(result or "Git operation done.")
